@@ -268,7 +268,7 @@ class Sniper:
         
         async with websockets.connect(DISCORD_WS_BASE, max_size=None) as ws:
             event = json.loads(await ws.recv())
-            interval = event["d"]["heartbeat_interval"] / 1000
+            interval = event["d"]["heartbeat_interval"] / 1500
             asyncio.gather(self.heartbeat(ws, interval))
             
             await self._identify(ws)
