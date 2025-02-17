@@ -260,17 +260,21 @@ class Sniper:
             self.logger.error("At least one option has to be True.")
             return
 
-        system("title yay joins v1.0.0")
+        system("title yay joins")
         system("CLS")
 
         self.logger.info("SNIPER STARTED")
         
         
         async with websockets.connect(DISCORD_WS_BASE, max_size=None) as ws:
-            event = json.loads(await ws.recv())
-            interval = event["d"]["heartbeat_interval"] / 1500
-            asyncio.gather(self.heartbeat(ws, interval))
+            while True:
+                try:
+                    event = json.loads(await ws.recv())
+                    interval = event["d"]["heartbeat_interval"] / 1500
+                    asyncio.gather(self.heartbeat(ws, interval))
             
-            await self._identify(ws)
-            await self._subscribe(ws)
-            await self._on_message(ws)
+                    await self._identify(ws)
+                    await self._subscribe(ws)
+                    await self._on_message(ws)
+                except:
+                    pass
