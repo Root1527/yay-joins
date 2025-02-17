@@ -1,5 +1,8 @@
 import logging
 import asyncio
+import json
+import websockets
+import websockets.exceptions
 from os import system
 from datetime import datetime
 from pathlib import Path
@@ -14,7 +17,7 @@ import aiohttp
 
 PLACE_ID = 15532962292
 BASE_ROBLOX_URL = f"https://www.roblox.com/games/{PLACE_ID}/Sols-RNG-Eon1-1"
-DISCORD_API_BASE = "https://discord.com/api/v10"
+DISCORD_WS_BASE = "wss://gateway.discord.gg/?v=10&encoding-json"
 SHARELINKS_API = "https://apis.roblox.com/sharelinks/v1/resolve-link"
 REFRESH_INTERVAL = 3600
 
@@ -24,7 +27,6 @@ class Sniper:
         self.config = self._load_config()
         self._setup_logging()
         self.temp_links: Set[str] = set()
-        self.session: Optional[aiohttp.ClientSession] = None
         self.roblox_session: Optional[aiohttp.ClientSession] = None
         self._refresh_task = None
         self.is_running = True
@@ -40,13 +42,14 @@ class Sniper:
         self.blacklists = [
             re.compile(pattern)
             for pattern in [
-                "need|want|lf|look|stop|how|bait|snip|fake|real|pl|mem|aur|hunt|sho|sea|wait|tho|think|ago|gone|prob|try|dev|adm|or|see|cap|tot|is|us|spa|giv|get|hav|and|str|sc|br|rai|wi|san|star|null|pm|gra|pump|moon|scr|mac|do|did|jk|exchange|no|rep|dm|farm|sum|who|if|imag|pro|bot|next|post|was",
-                "need|want|lf|look|stop|how|bait|ste|snip|fake|real|pl|hunt|on|sho|sea|wait|tho|gone|think|ago|prob|try|dev|adm|or|see|cap|tot|is|us|spa|giv|get|hav|and|str|sc|br|rai|wi|san|star|null|pm|gra|pump|moon|scr|mac|do|did|jk|no|rep|dm|farm|sum|who|if|imag|pro|bot|next|post|was",
-                "need|want|lf|look|stop|how|bait|ste|snip|fake|real|pl|hunt|on|sho|sea|wait|tho|gone|think|ago|prob|try|dev|adm|or|see|cap|tot|is|us|giv|get|hav|and|str|br|rai|wi|san|star|null|pm|gra|pump|moon|scr|mac|do|did|jk|no|rep|dm|farm|sum|who|if|imag|pro|bot|next|post|was",
+                "need|want|lf|look|stop|how|bait|snip|fak|real|pl|mem|aur|hunt|sho|sea|wait|tho|think|ago|gone|prob|try|dev|adm|or|see|cap|tot|is|us|spa|giv|get|hav|and|str|sc|br|rai|wi|san|star|null|pm|gra|pump|moon|scr|mac|do|did|jk|exchange|no|rep|dm|farm|sum|who|if|imag|pro|bot|next|post|was",
+                "need|want|lf|look|stop|how|bait|ste|snip|fak|real|pl|hunt|on|sho|sea|wait|tho|gone|think|ago|prob|try|dev|adm|or|see|cap|tot|is|us|spa|giv|get|hav|and|str|sc|br|rai|wi|san|star|null|pm|gra|pump|moon|scr|mac|do|did|jk|no|rep|dm|farm|sum|who|if|imag|pro|bot|next|post|was|bae|fae",
+                "need|want|lf|look|stop|how|bait|ste|snip|fak|real|pl|hunt|on|sho|sea|wait|tho|gone|think|ago|prob|try|dev|adm|or|see|cap|tot|is|us|giv|get|hav|and|str|br|rai|wi|san|star|null|pm|gra|pump|moon|scr|mac|do|did|jk|no|rep|dm|farm|sum|who|if|imag|pro|bot|next|post|was|bae|fae",
             ]
         ]
         self.word_patterns = [
-            re.compile(pattern) for pattern in [r"jest| ob|op", r"g[litc]+h", r"d[rea]+ms"]
+            re.compile(pattern)
+            for pattern in [r"jest| ob|op", r"g[litc]+h", r"d[rea]+ms"]
         ]
 
     def _load_config(self) -> ConfigParser:
@@ -64,12 +67,6 @@ class Sniper:
         self.logger = logging.getLogger(__name__)
 
     async def setup(self):
-        headers = {
-            "authorization": self.config["Authentication"]["Discord Token"],
-        }
-
-        self.session = aiohttp.ClientSession(headers=headers)
-
         self.roblox_session = aiohttp.ClientSession()
         self.roblox_session.cookie_jar.update_cookies(
             {".ROBLOSECURITY": self.config["Authentication"]["ROBLOSECURITY Cookie"]}
@@ -81,25 +78,55 @@ class Sniper:
             self.temp_links.clear()
             self.logger.info("Refreshed filtered link list!")
 
-    async def fetch_message(self, channel_id: int) -> List[dict]:
-        try:
-            async with self.session.get(
-                f"{DISCORD_API_BASE}/channels/{channel_id}/messages?limit=1"
-            ) as response:
-                if response.status >= 400:
-                    self.logger.warning(response.reason)
-                    return []
-                return await response.json()
-        except Exception as e:
-            self.logger.error(f"Error fetching messages: {str(e)}")
-            return []
+    async def _identify(self, ws):
+        identify_payload = {
+            "op": 2,
+            "d": {
+                "token": self.config["Authentication"]["Discord Token"],
+                "properties": {"$os": "windows", "$browser": "chrome", "$device": "pc"}
+            }
+        }
+        await ws.send(json.dumps(identify_payload))
+        
+    async def _subscribe(self, ws):
+        subscription_payload = {
+            "op": 14,
+            "d": {
+                    "guild_id": "1186570213077041233",
+                    "channels_ranges": {},
+                    "typing": True,
+                    "threads": False,
+                    "activities": False,
+                    "members": [],
+                    "thread_member_lists": []
+                }
+            }
+        await ws.send(json.dumps(subscription_payload))
+
+    async def heartbeat(self, ws, interval):
+        while True:
+            await asyncio.sleep(interval)
+            heartbeatJSON= {
+                'op':1,
+                'd': 'null'
+            }
+            await ws.send(json.dumps(heartbeatJSON))
+
+    async def _on_message(self, ws):
+        while True:
+            event = json.loads(await ws.recv())
+            try:
+                if event["t"] == "MESSAGE_CREATE":
+                    for choice_id in self.cycle_index:
+                        if (int(event["d"]["channel_id"]) == [1282543762425516083,1282542323590496277,1282542323590496277][choice_id]):
+                            await self.process_message(event["d"]["content"], choice_id)
+                if event['op'] == 9:
+                    await self._identify(ws)
+            except:
+                pass
 
     def _should_process_message(self, message: str, choice_id: int) -> bool:
         if message in self.temp_links:
-            return False
-
-        if len(self.temp_links) == 0:
-            self.temp_links.add(message)
             return False
 
         if not self.word_patterns[choice_id].search(message.lower()):
@@ -156,14 +183,18 @@ class Sniper:
         final_link = f"roblox://placeID={PLACE_ID}^&linkCode={server_code}"
         adb_path = Path(self.config["Technical"]["LDPlayer Path"]) / "adb.exe"
 
-        proc = await asyncio.create_subprocess_exec(
-            adb_path, "devices", stdout=asyncio.subprocess.PIPE
-        )
-        output = await proc.stdout.read()
-        devices = self.emu_pattern.findall(output.decode())
+        if self.config["Technical"]["Using Multiple Instances"].lower() == "true":
+            proc = await asyncio.create_subprocess_exec(
+                adb_path, "devices", stdout=asyncio.subprocess.PIPE
+            )
+            output = await proc.stdout.read()
+            devices = self.emu_pattern.findall(output.decode())
 
-        for device in devices:
-            shell_cmd = f"{adb_path} -s {device} shell am start -a android.intent.action.VIEW -d '{final_link}'"
+            for device in devices:
+                shell_cmd = f"{adb_path} -s {device} shell am start -a android.intent.action.VIEW -d '{final_link}'"
+                Popen(shell_cmd, shell=True)
+        else:
+            shell_cmd = f"{adb_path} shell am start -a android.intent.action.VIEW -d '{final_link}'"
             Popen(shell_cmd, shell=True)
 
     async def _join_windows(self, server_code: str):
@@ -192,21 +223,20 @@ class Sniper:
             ],
         }
 
-        async with self.session.post(webhook_url, json=payload) as response:
-            if response.status >= 400:
-                self.logger.error(f"Failed to send webhook: {await response.text()}")
+        async with aiohttp.ClientSession() as session:
+            async with session.post(webhook_url, json=payload) as response:
+                if response.status >= 400:
+                    self.logger.error(f"Failed to send webhook: {await response.text()}")
 
-    async def process_message(self, message: list[dict], choice_id: int) -> None:
+    async def process_message(self, content: str, choice_id: int) -> None:
         try:
-            content = message[0]["content"]
-
             if not self._should_process_message(content, choice_id):
                 return
 
             server_code = await self._extract_server_code(content)
             if not server_code:
                 return
-            
+
             self.logger.info(f"Found message! content: {content}")
 
             await self._handle_server_join(choice_id, server_code)
@@ -214,17 +244,6 @@ class Sniper:
 
         except Exception as e:
             self.logger.error(f"Error processing message: {str(e)}")
-
-    async def process_channel(self, choice_id: int) -> None:
-        channel_id = [1282543762425516083, 1282542323590496277, 1282542323590496277][
-            choice_id
-        ]
-        message = await self.fetch_message(channel_id)
-
-        if not message:
-            return
-
-        await self.process_message(message, choice_id)
 
     async def run(self):
         await self.setup()
@@ -235,38 +254,23 @@ class Sniper:
         dream = self.config["Toggles"]["Dreamspace"].lower() == "true"
         snipe_list = [jester, glitch, dream]
 
+        self.cycle_index = [i for i, x in enumerate(snipe_list) if x]
+
         if not (jester or glitch or dream):
             self.logger.error("At least one option has to be True.")
             return
-
-        cycle = (
-            (jester and glitch and dream)
-            or (jester and (glitch or dream))
-            or (glitch and dream)
-        )
-        cycle_index = [i for i, x in enumerate(snipe_list) if x]
-        x = 0
-
-        if not cycle:
-            if jester:
-                choice = 0
-            elif glitch:
-                choice = 1
-            else:
-                choice = 2
 
         system("title yay joins v1.0.0")
         system("CLS")
 
         self.logger.info("SNIPER STARTED")
-
-        while self.is_running:
-            if not cycle:
-                async with asyncio.TaskGroup() as tg:
-                    tg.create_task(self.process_channel(choice))
-                    continue
-
-            for i in cycle_index:
-                choice = i
-                async with asyncio.TaskGroup() as tg:
-                    tg.create_task(self.process_channel(choice))
+        
+        
+        async with websockets.connect(DISCORD_WS_BASE, max_size=None) as ws:
+            event = json.loads(await ws.recv())
+            interval = event["d"]["heartbeat_interval"] / 1000
+            asyncio.gather(self.heartbeat(ws, interval))
+            
+            await self._identify(ws)
+            await self._subscribe(ws)
+            await self._on_message(ws)
