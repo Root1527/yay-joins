@@ -182,12 +182,15 @@ class Sniper:
         self.logger.info(f"{self.words[choice_id]} link found\nyay joins")
 
     async def _join_ldplayer(self, server_code: str):
-        final_link = f"roblox://placeID={PLACE_ID}&linkCode={server_code}"
-        shell = f"am start -a android.intent.action.VIEW '{final_link}'"
+        final_link = f"roblox://placeID={PLACE_ID}\&linkCode={server_code}"
+        shell = f"am start -a android.intent.action.VIEW {final_link}\n"
         data = shell.encode("utf-8")
 
         for proc in self.output_list:
-            await proc.communicate(data)
+            proc.stdin.write(data)
+            out = await proc.stdout.readline()
+            print(out)
+
 
     async def _join_windows(self, server_code: str):
         final_link = f"roblox://placeID={PLACE_ID}^&linkCode={server_code}"
