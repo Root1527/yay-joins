@@ -29,6 +29,8 @@ class Sniper:
         self.temp_links: Set[str] = set()
         self.roblox_session: Optional[aiohttp.ClientSession] = None
         self._refresh_task = None
+        self.output_list = []
+        self.adb_path = Path(self.config["Technical"]["LDPlayer Path"]) / "adb.exe"
         self.is_running = True
 
         self.words = ["Jester", "Glitched", "Dreamspace"]
@@ -49,7 +51,7 @@ class Sniper:
         ]
         self.word_patterns = [
             re.compile(pattern)
-            for pattern in [r"jest| ob|op", r"g[litc]+h", r"d[rea]+ms"]
+            for pattern in [r"jest| ob|op", r"g[liotc]+h", r"d[rea]+ms"]
         ]
 
     def _load_config(self) -> ConfigParser:
@@ -118,7 +120,7 @@ class Sniper:
             try:
                 if event["t"] == "MESSAGE_CREATE":
                     for choice_id in self.cycle_index:
-                        if (int(event["d"]["channel_id"]) == [1282543762425516083,1282542323590496277,1282542323590496277][choice_id]):
+                        if (int(event["d"]["channel_id"]) == [1282543762425516083, 1282542323590496277, 1282542323590496277][choice_id]):
                             await self.process_message(event["d"]["content"], choice_id)
                 if event['op'] == 9:
                     await self._identify(ws)
@@ -180,22 +182,12 @@ class Sniper:
         self.logger.info(f"{self.words[choice_id]} link found\nyay joins")
 
     async def _join_ldplayer(self, server_code: str):
-        final_link = f"roblox://placeID={PLACE_ID}^&linkCode={server_code}"
-        adb_path = Path(self.config["Technical"]["LDPlayer Path"]) / "adb.exe"
+        final_link = f"roblox://placeID={PLACE_ID}&linkCode={server_code}"
+        shell = f"am start -a android.intent.action.VIEW '{final_link}'"
+        data = shell.encode("utf-8")
 
-        if self.config["Technical"]["Using Multiple Instances"].lower() == "true":
-            proc = await asyncio.create_subprocess_exec(
-                adb_path, "devices", stdout=asyncio.subprocess.PIPE
-            )
-            output = await proc.stdout.read()
-            devices = self.emu_pattern.findall(output.decode())
-
-            for device in devices:
-                shell_cmd = f"{adb_path} -s {device} shell am start -a android.intent.action.VIEW -d '{final_link}'"
-                Popen(shell_cmd, shell=True)
-        else:
-            shell_cmd = f"{adb_path} shell am start -a android.intent.action.VIEW -d '{final_link}'"
-            Popen(shell_cmd, shell=True)
+        for proc in self.output_list:
+            await proc.communicate(data)
 
     async def _join_windows(self, server_code: str):
         final_link = f"roblox://placeID={PLACE_ID}^&linkCode={server_code}"
@@ -259,22 +251,35 @@ class Sniper:
         if not (jester or glitch or dream):
             self.logger.error("At least one option has to be True.")
             return
-
+            
         system("title yay joins")
         system("CLS")
 
-        self.logger.info("SNIPER STARTED")
+        self.logger.info("SNIPER STARTED")  
         
+        if self.config["Technical"]["Use LDPlayer"].lower() == "true":
+            proc = await asyncio.create_subprocess_exec(
+                self.adb_path, "devices", stdout=asyncio.subprocess.PIPE
+            )
+            output = await proc.stdout.read()
+            devices = self.emu_pattern.findall(output.decode())
+
+            for device in devices:
+                proc = await asyncio.create_subprocess_exec(
+                    self.adb_path, "-s", device, "shell", stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE
+                )
+
+                self.output_list.append(proc) 
         
         async with websockets.connect(DISCORD_WS_BASE, max_size=None) as ws:
             while True:
                 try:
                     event = json.loads(await ws.recv())
-                    interval = event["d"]["heartbeat_interval"] / 1500
+                    interval = event["d"]["heartbeat_interval"] / 2000
                     asyncio.gather(self.heartbeat(ws, interval))
             
                     await self._identify(ws)
                     await self._subscribe(ws)
                     await self._on_message(ws)
-                except:
-                    pass
+                except Exception as e:
+                    self.logger.error(e)
