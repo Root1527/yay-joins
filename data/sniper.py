@@ -255,10 +255,6 @@ class Sniper:
             self.logger.error("At least one option has to be True.")
             return
             
-        system("title yay joins")
-        system("CLS")
-
-        self.logger.info("SNIPER STARTED")  
         
         if self.config["Technical"]["Use LDPlayer"].lower() == "true":
             proc = await asyncio.create_subprocess_exec(
@@ -273,12 +269,17 @@ class Sniper:
                 )
 
                 self.output_list.append(proc) 
+                
+        system("title yay joins")
+        system("CLS")
+
+        self.logger.info("SNIPER STARTED")  
         
-        async with websockets.connect(DISCORD_WS_BASE, max_size=None) as ws:
-            while True:
+        while True:
+            async with websockets.connect(DISCORD_WS_BASE, max_size=None) as ws:
                 try:
                     event = json.loads(await ws.recv())
-                    interval = event["d"]["heartbeat_interval"] / 2000
+                    interval = event["d"]["heartbeat_interval"] / 1500
                     asyncio.gather(self.heartbeat(ws, interval))
             
                     await self._identify(ws)
