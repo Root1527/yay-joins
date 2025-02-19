@@ -99,12 +99,15 @@ class Sniper:
 
     async def heartbeat(self, ws, interval):
         while True:
-            await asyncio.sleep(interval)
-            heartbeatJSON= {
-                'op':1,
-                'd': 'null'
-            }
-            await ws.send(json.dumps(heartbeatJSON))
+            try:
+                await asyncio.sleep(interval)
+                heartbeatJSON= {
+                    'op':1,
+                    'd': 'null'
+                }
+                await ws.send(json.dumps(heartbeatJSON))
+            except:
+                pass
 
     async def _on_message(self, ws):
         while True:
