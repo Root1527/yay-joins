@@ -19,14 +19,12 @@ PLACE_ID = 15532962292
 BASE_ROBLOX_URL = f"https://www.roblox.com/games/{PLACE_ID}/Sols-RNG-Eon1-1"
 DISCORD_WS_BASE = "wss://gateway.discord.gg/?v=10&encoding-json"
 SHARELINKS_API = "https://apis.roblox.com/sharelinks/v1/resolve-link"
-REFRESH_INTERVAL = 3600
 
 
 class Sniper:
     def __init__(self):
         self.config = self._load_config()
         self._setup_logging()
-        self.temp_links: Set[str] = set()
         self.roblox_session: Optional[aiohttp.ClientSession] = None
         self._refresh_task = None
         self.output_list = []
@@ -74,12 +72,6 @@ class Sniper:
             {".ROBLOSECURITY": self.config["Authentication"]["ROBLOSECURITY Cookie"]}
         )
 
-    async def refresh_temp_links(self):
-        while True:
-            await asyncio.sleep(REFRESH_INTERVAL)
-            self.temp_links.clear()
-            self.logger.info("Refreshed filtered link list!")
-
     async def _identify(self, ws):
         identify_payload = {
             "op": 2,
@@ -118,29 +110,23 @@ class Sniper:
         while True:
             event = json.loads(await ws.recv())
             try:
+                if event['op'] == 9:
+                    await self._identify(ws)
                 if event["t"] == "MESSAGE_CREATE":
                     for choice_id in self.cycle_index:
                         if (int(event["d"]["channel_id"]) == [1282543762425516083, 1282542323590496277, 1282542323590496277][choice_id]):
                             await self.process_message(event["d"]["content"], choice_id)
-                if event['op'] == 9:
-                    await self._identify(ws)
             except:
                 pass
 
-    def _should_process_message(self, message: str, choice_id: int) -> bool:
-        if message in self.temp_links:
-            return False
-
+    def _should_process_message(self, message: str, choice_id: int) -> bool:          
         if not self.word_patterns[choice_id].search(message.lower()):
-            self.temp_links.add(message)
             return False
 
         if self.blacklists[choice_id].search(message.lower()):
-            self.temp_links.add(message)
             self.logger.info(f"Filtered message! content: {message}")
             return False
 
-        self.temp_links.add(message)
         return True
 
     async def _extract_server_code(self, message: str) -> Optional[str]:
@@ -182,7 +168,7 @@ class Sniper:
         self.logger.info(f"{self.words[choice_id]} link found\nyay joins")
 
     async def _join_ldplayer(self, server_code: str):
-        final_link = f"roblox://placeID={PLACE_ID}\&linkCode={server_code}"
+        final_link = fr"roblox://placeID={PLACE_ID}\&linkCode={server_code}"
         shell = f"am start -a android.intent.action.VIEW {final_link}\n"
         data = shell.encode("utf-8")
 
@@ -242,7 +228,6 @@ class Sniper:
 
     async def run(self):
         await self.setup()
-        self._refresh_task = asyncio.create_task(self.refresh_temp_links())
 
         jester = self.config["Toggles"]["Jester"].lower() == "true"
         glitch = self.config["Toggles"]["Glitched"].lower() == "true"
@@ -273,17 +258,17 @@ class Sniper:
         system("title yay joins")
         system("CLS")
 
-        self.logger.info("SNIPER STARTED")  
+        self.logger.info("SNIPER STARTED")
         
         while True:
-            async with websockets.connect(DISCORD_WS_BASE, max_size=None) as ws:
-                try:
+            try:
+                async with websockets.connect(DISCORD_WS_BASE, max_size=None) as ws:
                     event = json.loads(await ws.recv())
-                    interval = event["d"]["heartbeat_interval"] / 1500
+                    interval = event["d"]["heartbeat_interval"] / 1000
                     asyncio.gather(self.heartbeat(ws, interval))
             
                     await self._identify(ws)
                     await self._subscribe(ws)
                     await self._on_message(ws)
-                except Exception as e:
-                    self.logger.error(e)
+            except:
+                pass     
