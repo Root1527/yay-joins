@@ -106,8 +106,8 @@ class Sniper:
                     'd': 'null'
                 }
                 await ws.send(json.dumps(heartbeatJSON))
-            except:
-                pass
+            except Exception as e:
+                self.logger.error(e)
 
     async def _on_message(self, ws):
         while True:
@@ -119,8 +119,8 @@ class Sniper:
                     for choice_id in self.cycle_index:
                         if (int(event["d"]["channel_id"]) == [1282543762425516083, 1282542323590496277, 1282542323590496277][choice_id]):
                             await self.process_message(event["d"]["content"], choice_id)
-            except:
-                pass
+            except Exception as e:
+                self.logger.error(e)
 
     def _should_process_message(self, message: str, choice_id: int) -> bool:          
         if not self.word_patterns[choice_id].search(message.lower()):
@@ -246,8 +246,9 @@ class Sniper:
         
         if self.config["Technical"]["Use LDPlayer"].lower() == "true":
             proc = await asyncio.create_subprocess_exec(
-                self.adb_path, "devices", stdout=asyncio.subprocess.PIPE
+			    self.adb_path, "devices", stdout=asyncio.subprocess.PIPE
             )
+
             output = await proc.stdout.read()
             devices = self.emu_pattern.findall(output.decode())
 
@@ -273,5 +274,5 @@ class Sniper:
                     await self._identify(ws)
                     await self._subscribe(ws)
                     await self._on_message(ws)
-            except:
-                pass     
+            except Exception as e:
+                self.logger.error(e)
