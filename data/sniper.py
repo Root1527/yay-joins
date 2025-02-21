@@ -1,5 +1,5 @@
 from logging import basicConfig, INFO, getLogger
-from asyncio import sleep, create_subprocess_exec, gather
+from asyncio import sleep, create_subprocess_exec, TaskGroup
 from asyncio.subprocess import PIPE
 from json import dumps, loads
 from websockets import connect
@@ -178,7 +178,6 @@ class Sniper:
         for proc in self.output_list:
             proc.stdin.write(data)
             out = await proc.stdout.readline()
-            print(out)
 
 
     async def _join_windows(self, server_code: str):
@@ -268,12 +267,12 @@ class Sniper:
             try:
                 async with connect(DISCORD_WS_BASE, max_size=None, ping_interval=None) as ws:
                     await self._identify(ws)
+                    await self._subscribe(ws)
                                         
                     event = loads(await ws.recv())
                     interval = event["d"]["heartbeat_interval"] / 1000
-                    await self.heartbeat(ws, interval)
-            
-                    await self._subscribe(ws)
-                    await self._on_message(ws)
+                    async with TaskGroup() as tg:
+                        tg.create_task(self.heartbeat(ws, interval))
+                        tg.create_task(self._on_message(ws))
             except Exception as e:
                 self.logger.error(e)
