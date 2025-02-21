@@ -108,6 +108,7 @@ class Sniper:
                 await sleep(interval)
             except Exception as e:
                 self.logger.error(e)
+                break
 
     async def _on_message(self, ws):
         while True:
@@ -266,9 +267,9 @@ class Sniper:
 
         self.logger.info("SNIPER STARTED")
       
-        async with connect(DISCORD_WS_BASE, max_size=None, ping_interval=None) as ws:
-            while True:
-                try:
+        while True:
+            try:
+                async with connect(DISCORD_WS_BASE, max_size=None, ping_interval=None) as ws:
                     event = loads(await ws.recv())
                     interval = event["d"]["heartbeat_interval"] / 1000
                     await gather(self.heartbeat(ws, interval))
@@ -276,5 +277,5 @@ class Sniper:
                     await self._identify(ws)
                     await self._subscribe(ws)
                     await self._on_message(ws)
-                except Exception as e:
-                    self.logger.error(e)
+            except Exception as e:
+                self.logger.error(e)
