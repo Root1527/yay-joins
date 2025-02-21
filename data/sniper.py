@@ -100,12 +100,12 @@ class Sniper:
     async def heartbeat(self, ws, interval):
         while True:
             try:
-                await sleep(interval)
                 heartbeat_json= {
                     'op':1,
                     'd': 'null'
                 }
                 await ws.send(dumps(heartbeat_json))
+                await sleep(interval)
             except Exception as e:
                 self.logger.error(e)
 
@@ -114,7 +114,7 @@ class Sniper:
             event = loads(await ws.recv())
             try:
                 if event['op'] == 9:
-                    await self._identify(ws)
+                    return
                 if event["t"] == "MESSAGE_CREATE":
                     channel_id = event["d"]["channel_id"]
                     content = event["d"]["content"]
