@@ -1,18 +1,18 @@
-import logging
-import asyncio
-import json
-import websockets
-import websockets.exceptions
+from logging import basicConfig, INFO, getLogger
+from asyncio import sleep, create_subprocess_exec, gather
+from asyncio.subprocess import PIPE
+from json import dumps, loads
+from websockets import connect
 from os import system
 from datetime import datetime
 from pathlib import Path
 from configparser import ConfigParser
-import re
-from typing import Set, Optional, List
+from re import compile
+from typing import Optional
 from subprocess import Popen
 
 
-import aiohttp
+from aiohttp import ClientSession
 
 
 PLACE_ID = 15532962292
@@ -25,7 +25,7 @@ class Sniper:
     def __init__(self):
         self.config = self._load_config()
         self._setup_logging()
-        self.roblox_session: Optional[aiohttp.ClientSession] = None
+        self.roblox_session: Optional[ClientSession] = None
         self._refresh_task = None
         self.output_list = []
         self.adb_path = Path(self.config["Technical"]["LDPlayer Path"]) / "adb.exe"
@@ -33,14 +33,14 @@ class Sniper:
 
         self.words = ["Jester", "Glitched", "Dreamspace"]
 
-        self.link_pattern = re.compile(
+        self.link_pattern = compile(
             f"https://www.roblox.com/games/{PLACE_ID}/Sols-RNG-Eon1-1\\?privateServerLinkCode="
         )
-        self.link_pattern_2 = re.compile(r"https://.*&type=Server")
-        self.emu_pattern = re.compile(r"emulator-[0-9]{4}")
+        self.link_pattern_2 = compile(r"https://.*&type=Server")
+        self.emu_pattern = compile(r"emulator-[0-9]{4}")
 
         self.blacklists = [
-            re.compile(pattern)
+            compile(pattern)
             for pattern in [
                 "need|want|lf|look|stop|how|bait|snip|fak|real|pl|mem|aur|hunt|sho|sea|wait|tho|think|ago|gone|prob|try|dev|adm|or|see|cap|tot|is|us|spa|giv|get|hav|and|str|sc|br|rai|wi|san|star|null|pm|gra|pump|moon|scr|mac|do|did|jk|exchange|no|rep|dm|farm|sum|who|if|imag|pro|bot|next|post|was",
                 "need|want|lf|look|stop|how|bait|ste|snip|fak|real|pl|hunt|on|sho|sea|wait|tho|gone|think|ago|prob|try|dev|adm|or|see|cap|tot|is|us|spa|giv|get|hav|and|str|sc|br|rai|wi|san|star|null|pm|gra|pump|moon|scr|mac|do|did|jk|no|rep|dm|farm|sum|who|if|imag|pro|bot|next|post|was|bae|fae",
@@ -48,7 +48,7 @@ class Sniper:
             ]
         ]
         self.word_patterns = [
-            re.compile(pattern)
+            compile(pattern)
             for pattern in [r"jest| ob|op", r"g[liotc]+h", r"d[rea]+ms"]
         ]
 
@@ -58,16 +58,16 @@ class Sniper:
         return config
 
     def _setup_logging(self):
-        logging.basicConfig(
+        basicConfig(
             encoding="utf-8",
-            level=logging.INFO,
+            level=INFO,
             format="[%(asctime)s] - %(message)s",
             datefmt="%H:%M:%S",
         )
-        self.logger = logging.getLogger(__name__)
+        self.logger = getLogger(__name__)
 
     async def setup(self):
-        self.roblox_session = aiohttp.ClientSession()
+        self.roblox_session = ClientSession()
         self.roblox_session.cookie_jar.update_cookies(
             {".ROBLOSECURITY": self.config["Authentication"]["ROBLOSECURITY Cookie"]}
         )
@@ -80,7 +80,7 @@ class Sniper:
                 "properties": {"$os": "windows", "$browser": "chrome", "$device": "pc"}
             }
         }
-        await ws.send(json.dumps(identify_payload))
+        await ws.send(dumps(identify_payload))
         
     async def _subscribe(self, ws):
         subscription_payload = {
@@ -95,30 +95,32 @@ class Sniper:
                     "thread_member_lists": []
                 }
             }
-        await ws.send(json.dumps(subscription_payload))
+        await ws.send(dumps(subscription_payload))
 
     async def heartbeat(self, ws, interval):
         while True:
             try:
-                await asyncio.sleep(interval)
-                heartbeatJSON= {
+                await sleep(interval)
+                heartbeat_json= {
                     'op':1,
                     'd': 'null'
                 }
-                await ws.send(json.dumps(heartbeatJSON))
+                await ws.send(dumps(heartbeat_json))
             except Exception as e:
                 self.logger.error(e)
 
     async def _on_message(self, ws):
         while True:
-            event = json.loads(await ws.recv())
+            event = loads(await ws.recv())
             try:
                 if event['op'] == 9:
                     await self._identify(ws)
                 if event["t"] == "MESSAGE_CREATE":
+                    channel_id = event["d"]["channel_id"]
+                    content = event["d"]["content"]
                     for choice_id in self.cycle_index:
-                        if (int(event["d"]["channel_id"]) == [1282543762425516083, 1282542323590496277, 1282542323590496277][choice_id]):
-                            await self.process_message(event["d"]["content"], choice_id)
+                        if int(channel_id) == [1282543762425516083, 1282542323590496277, 1282542323590496277][choice_id]:
+                            await self.process_message(content, choice_id)
             except Exception as e:
                 self.logger.error(e)
 
@@ -207,7 +209,7 @@ class Sniper:
             ],
         }
 
-        async with aiohttp.ClientSession() as session:
+        async with ClientSession() as session:
             async with session.post(webhook_url, json=payload) as response:
                 if response.status >= 400:
                     self.logger.error(f"Failed to send webhook: {await response.text()}")
@@ -245,16 +247,16 @@ class Sniper:
             
         
         if self.config["Technical"]["Use LDPlayer"].lower() == "true":
-            proc = await asyncio.create_subprocess_exec(
-			    self.adb_path, "devices", stdout=asyncio.subprocess.PIPE
+            proc = await create_subprocess_exec(
+			    self.adb_path, "devices", stdout=PIPE
             )
 
             output = await proc.stdout.read()
             devices = self.emu_pattern.findall(output.decode())
 
             for device in devices:
-                proc = await asyncio.create_subprocess_exec(
-                    self.adb_path, "-s", device, "shell", stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE
+                proc = await create_subprocess_exec(
+                    self.adb_path, "-s", device, "shell", stdin=PIPE, stdout=PIPE
                 )
 
                 self.output_list.append(proc) 
@@ -263,16 +265,16 @@ class Sniper:
         system("CLS")
 
         self.logger.info("SNIPER STARTED")
-        
-        while True:
-            try:
-                async with websockets.connect(DISCORD_WS_BASE, max_size=None) as ws:
-                    event = json.loads(await ws.recv())
+      
+        async with connect(DISCORD_WS_BASE, max_size=None, ping_interval=None) as ws:
+            while True:
+                try:
+                    event = loads(await ws.recv())
                     interval = event["d"]["heartbeat_interval"] / 1000
-                    asyncio.gather(self.heartbeat(ws, interval))
+                    await gather(self.heartbeat(ws, interval))
             
                     await self._identify(ws)
                     await self._subscribe(ws)
                     await self._on_message(ws)
-            except Exception as e:
-                self.logger.error(e)
+                except Exception as e:
+                    self.logger.error(e)
