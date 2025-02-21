@@ -108,14 +108,11 @@ class Sniper:
                 await sleep(interval)
             except Exception as e:
                 self.logger.error(e)
-                return
 
     async def _on_message(self, ws):
         while True:
             event = loads(await ws.recv())
             try:
-                if event['op'] == 9:
-                    return
                 if event["t"] == "MESSAGE_CREATE":
                     channel_id = event["d"]["channel_id"]
                     content = event["d"]["content"]
@@ -267,15 +264,16 @@ class Sniper:
 
         self.logger.info("SNIPER STARTED")
       
-        async with connect(DISCORD_WS_BASE, max_size=None, ping_interval=None) as ws:
-            while True:
-                try:
+        while True:
+            try:
+                async with connect(DISCORD_WS_BASE, max_size=None, ping_interval=None) as ws:
+                    await self._identify(ws)
+                                        
                     event = loads(await ws.recv())
                     interval = event["d"]["heartbeat_interval"] / 1000
-                    await gather(self.heartbeat(ws, interval))
+                    await self.heartbeat(ws, interval)
             
-                    await self._identify(ws)
                     await self._subscribe(ws)
                     await self._on_message(ws)
-                except Exception as e:
-                    self.logger.error(e)
+            except Exception as e:
+                self.logger.error(e)
